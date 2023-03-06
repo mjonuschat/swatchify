@@ -36,6 +36,9 @@ pub(crate) struct GeneratorOptions {
     /// Output format
     #[clap(long, default_value = "stl")]
     output_format: OutputFormat,
+    /// Output format
+    #[clap(long, value_hint=ValueHint::FilePath, default_value = commands::generate::OPEN_SCAD_PATH)]
+    openscad_path: PathBuf,
     /// Force export and regenerate all existing files
     #[clap(short, long)]
     pub(crate) force: bool,

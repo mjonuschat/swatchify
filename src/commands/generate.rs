@@ -17,6 +17,16 @@ use std::process::Command;
 const SWATCH_SCAD_FILE: &[u8] = include_bytes!("../../templates/swatch.scad");
 const SWATCH_PARAMETERS: &[u8] = include_bytes!("../../templates/parameters.json");
 
+#[cfg(target_os = "macos")]
+pub(crate) const OPEN_SCAD_PATH: &str = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD";
+
+#[cfg(windows)]
+pub(crate) const OPEN_SCAD_PATH: &str = r#"C:\Program Files\Openscad\openscad.exe"#;
+
+// Unix like OS - assume openscad binary is in the path
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) const OPEN_SCAD_PATH: &str = r#"openscad"#;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct FilamentSwatchOptions {
     #[serde(rename = "$fn")]
@@ -100,11 +110,10 @@ fn render_text_field(filament: &FilamentRecord, field: &OutputField) -> String {
 fn render(
     filament: &FilamentRecord,
     destination_folder: &Path,
-    output_format: &OutputFormat,
-    options: &SwatchOptions,
+    options: &GeneratorOptions,
 ) -> Result<()> {
     let defaults: FilamentSwatchOptions = serde_json::from_slice(SWATCH_PARAMETERS)?;
-    let filename = match output_format {
+    let filename = match options.output_format {
         OutputFormat::ThreeMf => PathBuf::from(filament.to_string()).with_extension("3mf"),
         OutputFormat::Stl => PathBuf::from(filament.to_string()).with_extension("stl"),
     };
@@ -119,9 +128,9 @@ fn render(
     let work_dir = tempfile::tempdir()?;
 
     let swatch_options = FilamentSwatchOptions {
-        textstring1: render_text_field(filament, &options.text_upper),
-        textstring2: render_text_field(filament, &options.text_lower_left),
-        textstring3: render_text_field(filament, &options.text_lower_right),
+        textstring1: render_text_field(filament, &options.swatch_design.text_upper),
+        textstring2: render_text_field(filament, &options.swatch_design.text_lower_left),
+        textstring3: render_text_field(filament, &options.swatch_design.text_lower_right),
         texttop_configurable: filament
             .material
             .chars()
@@ -129,10 +138,10 @@ fn render(
             .map(|c| c.to_string())
             .collect::<Vec<String>>()
             .join(" "),
-        textsize_lower: options.text_size_lower.to_string(),
-        textsize_upper: options.text_size_upper.to_string(),
-        w: options.width.to_string(),
-        h: options.height.to_string(),
+        textsize_lower: options.swatch_design.text_size_lower.to_string(),
+        textsize_upper: options.swatch_design.text_size_upper.to_string(),
+        w: options.swatch_design.width.to_string(),
+        h: options.swatch_design.height.to_string(),
         ..defaults
     };
 
@@ -149,7 +158,7 @@ fn render(
     let swatch_parameters = work_dir.path().join("settings.json");
     serde_json::to_writer_pretty(&File::create(&swatch_parameters)?, &settings)?;
 
-    Command::new("/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD")
+    Command::new(&options.openscad_path)
         .arg("-o")
         .arg(dst)
         .arg("-p")
@@ -175,7 +184,7 @@ pub(crate) fn write(options: &GeneratorOptions) -> Result<()> {
         options
             .inventory
             .clone()
-            .unwrap_or_else(|| PathBuf::from("./inventory.txt")),
+            .unwrap_or_else(|| PathBuf::from("inventory.txt")),
     )?;
 
     let filaments: Vec<_> = reader
@@ -190,14 +199,7 @@ pub(crate) fn write(options: &GeneratorOptions) -> Result<()> {
     filaments
         .par_iter()
         .progress_with_style(progress_bar_style)
-        .try_for_each(|filament| {
-            render(
-                filament,
-                &destination_folder,
-                &options.output_format,
-                &options.swatch_design,
-            )
-        })?;
+        .try_for_each(|filament| render(filament, &destination_folder, options))?;
     Ok(())
 }
 
