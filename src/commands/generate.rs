@@ -16,7 +16,7 @@ const SWATCH_PARAMETERS: &[u8] = include_bytes!("../../templates/parameters.json
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct FilamentSwatchOptions {
     #[serde(rename = "$fn")]
-    func: String,
+    fragments: String,
     edge_tests: String,
     font_recessed: String,
     fontname: String,
