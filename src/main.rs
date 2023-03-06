@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{ArgAction, ColorChoice, Parser, ValueHint};
+use commands::generate::{OutputFormat, SwatchOptions};
 use std::path::PathBuf;
 
 mod commands;
@@ -32,9 +33,15 @@ pub(crate) struct GeneratorOptions {
     /// Output directory
     #[clap(short, long, value_hint=ValueHint::DirPath)]
     destination: Option<PathBuf>,
+    /// Output format
+    #[clap(long, default_value = "stl")]
+    output_format: OutputFormat,
     /// Force export and regenerate all existing files
     #[clap(short, long)]
     pub(crate) force: bool,
+    /// Testing
+    #[clap(flatten)]
+    swatch_design: SwatchOptions,
 }
 
 fn main() -> Result<()> {

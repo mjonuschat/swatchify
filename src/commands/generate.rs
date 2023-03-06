@@ -1,6 +1,8 @@
 use crate::helpers::fs;
 use crate::GeneratorOptions;
 use anyhow::Result;
+use clap::builder::PossibleValue;
+use clap::ValueEnum;
 use indicatif::{ParallelProgressIterator, ProgressStyle};
 use maplit::hashmap;
 use rayon::prelude::*;
@@ -86,9 +88,26 @@ impl Display for FilamentRecord {
     }
 }
 
-fn render(filament: &FilamentRecord, destination_folder: &Path) -> Result<()> {
+fn render_text_field(filament: &FilamentRecord, field: &OutputField) -> String {
+    match field {
+        OutputField::Manufacturer => filament.manufacturer.to_string(),
+        OutputField::Color => filament.color.to_string(),
+        OutputField::Temperature => format!("0.2mm @ {}°C", filament.temperature),
+        OutputField::Material => filament.material.to_string(),
+    }
+}
+
+fn render(
+    filament: &FilamentRecord,
+    destination_folder: &Path,
+    output_format: &OutputFormat,
+    options: &SwatchOptions,
+) -> Result<()> {
     let defaults: FilamentSwatchOptions = serde_json::from_slice(SWATCH_PARAMETERS)?;
-    let filename = PathBuf::from(filament.to_string()).with_extension(".3mf");
+    let filename = match output_format {
+        OutputFormat::ThreeMf => PathBuf::from(filament.to_string()).with_extension("3mf"),
+        OutputFormat::Stl => PathBuf::from(filament.to_string()).with_extension("stl"),
+    };
 
     let dst = destination_folder
         .join(&filament.material)
@@ -99,21 +118,27 @@ fn render(filament: &FilamentRecord, destination_folder: &Path) -> Result<()> {
     let dst = dst.join(filename);
     let work_dir = tempfile::tempdir()?;
 
-    let options = CustomizerSettings {
+    let swatch_options = FilamentSwatchOptions {
+        textstring1: render_text_field(filament, &options.text_upper),
+        textstring2: render_text_field(filament, &options.text_lower_left),
+        textstring3: render_text_field(filament, &options.text_lower_right),
+        texttop_configurable: filament
+            .material
+            .chars()
+            .into_iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<String>>()
+            .join(" "),
+        textsize_lower: options.text_size_lower.to_string(),
+        textsize_upper: options.text_size_upper.to_string(),
+        w: options.width.to_string(),
+        h: options.height.to_string(),
+        ..defaults
+    };
+
+    let settings = CustomizerSettings {
         parameter_sets: hashmap! {
-            "Generator".to_string() => FilamentSwatchOptions {
-                textstring1: format!("0.2mm @ {}°C", &filament.temperature),
-                textstring2: filament.manufacturer.to_owned(),
-                textstring3: filament.color.to_owned(),
-                texttop_configurable: filament
-                    .material
-                    .chars()
-                    .into_iter()
-                    .map(|c| c.to_string())
-                    .collect::<Vec<String>>()
-                    .join(" "),
-                ..defaults
-            }
+            "Generator".to_string() => swatch_options
         },
         ..Default::default()
     };
@@ -121,8 +146,8 @@ fn render(filament: &FilamentRecord, destination_folder: &Path) -> Result<()> {
     let swatch_path = work_dir.path().join("swatch.scad");
     std::fs::write(&swatch_path, SWATCH_SCAD_FILE)?;
 
-    let swatch_parameters = work_dir.path().join("customizer.json");
-    serde_json::to_writer_pretty(&File::create(&swatch_parameters)?, &options)?;
+    let swatch_parameters = work_dir.path().join("settings.json");
+    serde_json::to_writer_pretty(&File::create(&swatch_parameters)?, &settings)?;
 
     Command::new("/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD")
         .arg("-o")
@@ -165,6 +190,65 @@ pub(crate) fn write(options: &GeneratorOptions) -> Result<()> {
     filaments
         .par_iter()
         .progress_with_style(progress_bar_style)
-        .try_for_each(|filament| render(filament, &destination_folder))?;
+        .try_for_each(|filament| {
+            render(
+                filament,
+                &destination_folder,
+                &options.output_format,
+                &options.swatch_design,
+            )
+        })?;
     Ok(())
+}
+
+#[derive(clap::ValueEnum, Serialize, Deserialize, Clone, Debug)]
+pub(crate) enum OutputField {
+    Manufacturer,
+    Color,
+    Temperature,
+    Material,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub(crate) enum OutputFormat {
+    ThreeMf,
+    Stl,
+}
+
+impl ValueEnum for OutputFormat {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Stl, Self::ThreeMf]
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        Some(match self {
+            Self::Stl => PossibleValue::new("stl").help("Generate .stl files"),
+            Self::ThreeMf => PossibleValue::new("3mf").help("Generate .3mf files"),
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, clap::Args)]
+pub(crate) struct SwatchOptions {
+    /// Width of the filament swatch
+    #[clap(long, default_value_t = 80.0)]
+    pub width: f32,
+    /// Height of the filament swatch
+    #[clap(long, default_value_t = 32.0)]
+    pub height: f32,
+    /// Upper text line
+    #[clap(long, default_value = "temperature")]
+    pub text_upper: OutputField,
+    /// Left lower text line
+    #[clap(long, default_value = "manufacturer")]
+    pub text_lower_left: OutputField,
+    /// Left lower text line
+    #[clap(long, default_value = "color")]
+    pub text_lower_right: OutputField,
+    /// Upper text size in mm
+    #[clap(long, default_value_t = 4)]
+    pub text_size_upper: i8,
+    /// Lower text size in mm
+    #[clap(long, default_value_t = 5)]
+    pub text_size_lower: i8,
 }
