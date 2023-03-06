@@ -1,3 +1,4 @@
+use crate::helpers::fs;
 use crate::GeneratorOptions;
 use anyhow::Result;
 use indicatif::{ParallelProgressIterator, ProgressStyle};
@@ -9,19 +10,8 @@ use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use thiserror::Error;
-use walkdir::WalkDir;
 
 const SWATCH_PARAMETERS: &[u8] = include_bytes!("../../templates/parameters.json");
-const PRINTABLE_FILE_TYPES: [&str; 4] = ["step", "3mf", "stl", "obj"];
-
-#[derive(Debug, Error)]
-pub enum PathError {
-    #[error("Path `{0}` could not be resolved")]
-    Canonicalize(#[from] std::io::Error),
-    #[error("File or directory `{0}` is not accessible")]
-    Inaccessible(String),
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct FilamentSwatchOptions {
@@ -94,52 +84,6 @@ impl Display for FilamentRecord {
     }
 }
 
-pub fn is_printable_file(file: &str) -> bool {
-    let extension = Path::new(&file.to_lowercase())
-        .extension()
-        .and_then(|v| v.to_str().map(|v| v.to_owned()));
-
-    match extension {
-        Some(ext) => PRINTABLE_FILE_TYPES.contains(&ext.as_str()),
-        None => false,
-    }
-}
-
-fn is_dir_or_printable(entry: &walkdir::DirEntry) -> bool {
-    if entry.path().is_dir() {
-        return true;
-    }
-
-    entry
-        .file_name()
-        .to_str()
-        .map(is_printable_file)
-        .unwrap_or(false)
-}
-
-fn read_existing_swatches(path: &Path) -> Vec<String> {
-    WalkDir::new(path)
-        .into_iter()
-        .filter_entry(is_dir_or_printable)
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| !entry.path().is_dir())
-        .map(|entry| entry.file_name().to_string_lossy().to_string())
-        .collect::<Vec<String>>()
-}
-
-pub fn create_output_dir(path: &Path) -> Result<(), PathError> {
-    match std::fs::metadata(path) {
-        Ok(metadata) => {
-            if metadata.is_dir() {
-                Ok(())
-            } else {
-                Err(PathError::Inaccessible(path.to_string_lossy().to_string()))
-            }
-        }
-        Err(_e) => Ok(std::fs::create_dir_all(path)?),
-    }
-}
-
 fn render(filament: &FilamentRecord, destination_folder: &Path) -> Result<()> {
     let defaults: FilamentSwatchOptions = serde_json::from_slice(SWATCH_PARAMETERS)?;
     let filename = PathBuf::from(filament.to_string()).with_extension(".3mf");
@@ -148,7 +92,7 @@ fn render(filament: &FilamentRecord, destination_folder: &Path) -> Result<()> {
         .join(&filament.material)
         .join(&filament.manufacturer);
 
-    create_output_dir(&dst)?;
+    fs::create_output_dir(&dst)?;
 
     let dst = dst.join(filename);
     let work_dir = tempfile::tempdir()?;
@@ -195,8 +139,9 @@ pub(crate) fn write(options: &GeneratorOptions) -> Result<()> {
         .destination
         .clone()
         .unwrap_or_else(|| PathBuf::from("."));
-    create_output_dir(&destination_folder)?;
-    let existing = read_existing_swatches(&destination_folder);
+
+    fs::create_output_dir(&destination_folder)?;
+    let existing = fs::list_existing_swatches(&destination_folder);
 
     let mut reader = csv::Reader::from_path(
         options

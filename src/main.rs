@@ -3,6 +3,7 @@ use clap::{ArgAction, ColorChoice, Parser, ValueHint};
 use std::path::PathBuf;
 
 mod commands;
+mod helpers;
 
 #[derive(clap::Parser, Debug)]
 #[clap(author, about, version, name = "Customizable Filament Swatch Generator", color=ColorChoice::Auto)]
