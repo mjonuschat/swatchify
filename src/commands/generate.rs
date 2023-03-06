@@ -11,6 +11,8 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// Source: https://www.printables.com/model/27814-filament-swatch
+const SWATCH_SCAD_FILE: &[u8] = include_bytes!("../../templates/swatch.scad");
 const SWATCH_PARAMETERS: &[u8] = include_bytes!("../../templates/parameters.json");
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -116,19 +118,20 @@ fn render(filament: &FilamentRecord, destination_folder: &Path) -> Result<()> {
         ..Default::default()
     };
 
-    let customizer_path = work_dir.path().join("customizer.json");
-    serde_json::to_writer_pretty(&File::create(&customizer_path)?, &options)?;
+    let swatch_path = work_dir.path().join("swatch.scad");
+    std::fs::write(&swatch_path, SWATCH_SCAD_FILE)?;
+
+    let swatch_parameters = work_dir.path().join("customizer.json");
+    serde_json::to_writer_pretty(&File::create(&swatch_parameters)?, &options)?;
 
     Command::new("/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD")
-        .arg("--export-format")
-        .arg("binstl")
         .arg("-o")
         .arg(dst)
         .arg("-p")
-        .arg(customizer_path)
+        .arg(swatch_parameters)
         .arg("-P")
         .arg("Generator")
-        .arg("/Users/mjonuschat/Downloads/Configurable_Filament_Swatch_VZC.scad")
+        .arg(swatch_path)
         .output()?;
 
     Ok(())
